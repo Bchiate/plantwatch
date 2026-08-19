@@ -1,7 +1,11 @@
 project_id = "plantwatch"
 
 [functions.plant-report]
-verify_jwt = false   # public endpoint — single trusted audience per spec §2
+verify_jwt = true    # was false. The function performs no auth of its own and
+                     # writes to plantwatch_soil_readings with the service-role
+                     # key on every call, so an open endpoint meant anyone with
+                     # the URL could drive unbounded writes. report-v2 supersedes
+                     # it and verifies the user; nothing calls this any more.
 
 [db]
 major_version = 15

@@ -134,6 +134,22 @@ final class Preferences: ObservableObject {
     }
     func isNotifyOn(_ id: String) -> Bool { notifyPlants.contains(id) }
 
+    /// Swap all device-local customizations between two plant ids. Used when two
+    /// sensors are swapped so each plant's name/range/zone/alert settings follow
+    /// it to the channel it now reads from.
+    func swapLocalKeys(_ a: String, _ b: String) {
+        guard a != b else { return }
+        func swapEntry<T>(_ d: inout [String: T]) { let t = d[a]; d[a] = d[b]; d[b] = t }
+        swapEntry(&overrides)
+        swapEntry(&nameOverrides)
+        swapEntry(&zoneOverrides)
+        swapEntry(&lastStatus)
+        let aOn = notifyPlants.contains(a), bOn = notifyPlants.contains(b)
+        if bOn { notifyPlants.insert(a) } else { notifyPlants.remove(a) }
+        if aOn { notifyPlants.insert(b) } else { notifyPlants.remove(b) }
+        saveOverrides(); saveNames(); saveZones(); saveLastStatus(); saveNotifyPlants()
+    }
+
     /// Classify a moisture value against a low/high band.
     private func classify(_ m: Double, low: Int, high: Int) -> (Status, String, Bool) {
         if m < Double(low) {

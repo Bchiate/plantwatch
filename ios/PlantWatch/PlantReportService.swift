@@ -9,21 +9,31 @@ final class PlantReportService: ObservableObject {
     @Published private(set) var lastLoaded: Date?
     /// True when the signed-in user has no sensors configured yet.
     @Published private(set) var needsOnboarding = false
+    /// Per-account dashboard title (e.g. "Nober's PlantWatch"), nil until loaded.
+    @Published private(set) var gardenName: String?
 
     private var refreshTask: Task<Void, Never>?
 
-    func load(silent: Bool = false) async {
+    func load(silent: Bool = false, retried: Bool = false) async {
         if !silent { loading = true }
         defer { loading = false }
         do {
-            guard let token = await Auth.shared.accessToken() else { Auth.shared.signOut(); return }
+            // Don't sign out if we can't get a token — a transient blip shouldn't
+            // kick the user to the login screen. Keep the session and retry later.
+            guard let token = await Auth.shared.accessToken() else { return }
+            await loadGardenName()
             var req = URLRequest(url: Config.endpoint)
             req.cachePolicy = .reloadIgnoringLocalCacheData
             req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let (data, resp) = try await URLSession.shared.data(for: req)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 500
-            if status == 401 { Auth.shared.signOut(); return }
+            if status == 401 {
+                // Force one refresh + retry. refresh() only signs out if the
+                // refresh token is genuinely dead, so a blip won't log them out.
+                if !retried, await Auth.shared.refresh() { await load(silent: silent, retried: true) }
+                return
+            }
             guard status == 200 else { throw URLError(.badServerResponse) }
 
             // New user with no plants yet.
@@ -45,6 +55,16 @@ final class PlantReportService: ObservableObject {
     }
 
     private struct OnboardProbe: Decodable { let needs_onboarding: Bool? }
+
+    /// Fetch the account's dashboard title once (cached for the session).
+    private func loadGardenName() async {
+        guard gardenName == nil else { return }
+        guard let d = try? await Auth.shared.authed("rest/v1/profiles?select=garden_name") else { return }
+        if let rows = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]],
+           let gn = rows.first?["garden_name"] as? String, !gn.isEmpty {
+            gardenName = gn
+        }
+    }
 
     func startAutoRefresh() {
         refreshTask?.cancel()

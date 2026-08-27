@@ -56,12 +56,16 @@ struct ContentView: View {
                     }
                 }
                 .sheet(item: $infoReading) { reading in
-                    InfoSheet(reading: reading)
-                        .presentationDetents([.medium, .large])
-                        .presentationDragIndicator(.visible)
+                    InfoSheet(
+                        reading: reading,
+                        allReadings: svc.report?.applying(prefs).readings ?? [],
+                        onChanged: { Task { await svc.load() } }
+                    )
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
                 }
             }
-            .navigationTitle("Craig PlantWatch")
+            .navigationTitle(svc.gardenName ?? "PlantWatch")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -80,8 +84,9 @@ struct ContentView: View {
             .refreshable { await svc.load() }
         }
         .sheet(isPresented: $settingsOpen) {
-            SettingsSheet().environmentObject(prefs)
-                .presentationDetents([.medium])
+            SettingsSheet(onSensorsChanged: { Task { await svc.load() } })
+                .environmentObject(prefs)
+                .presentationDetents([.medium, .large])
         }
         .task {
             await svc.load()
@@ -248,12 +253,15 @@ private struct LayoutToggle: View {
 /// Sheet shown when the info (i) button is tapped on a card.
 private struct InfoSheet: View {
     let reading: Reading
+    var allReadings: [Reading] = []
+    var onChanged: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var prefs = Preferences.shared
     @State private var lowDraft: Double = 0
     @State private var highDraft: Double = 0
     @State private var notifyOn: Bool = false
     @State private var nameDraft: String = ""
+    @State private var swapOpen = false
     private var plantId: String { "\(reading.zone)-\(reading.channel)" }
     /// The plant's home (gateway) zone — what clearing the override reverts to.
     private var serverZone: String { reading.zone }
@@ -272,6 +280,22 @@ private struct InfoSheet: View {
             highDraft = Double(reading.idealHigh ?? 50)
             notifyOn  = prefs.isNotifyOn(plantId)
             nameDraft = reading.name
+        }
+        .sheet(isPresented: $swapOpen) {
+            SwapSensorView(
+                source: reading,
+                others: allReadings.filter { $0.id != reading.id },
+                performSwap: { target in
+                    do {
+                        try await SensorService.swapPlants(
+                            aZone: reading.zone, aChannel: reading.channel,
+                            bZone: target.zone, bChannel: target.channel)
+                        prefs.swapLocalKeys(reading.id, target.id)
+                        return nil
+                    } catch { return error.localizedDescription }
+                },
+                onSwapped: { onChanged(); dismiss() }
+            )
         }
     }
 
@@ -374,6 +398,24 @@ private struct InfoSheet: View {
                 }
             }
 
+            // Sensor / channel — fix physically-swapped sensors without numbers.
+            VStack(alignment: .leading, spacing: 6) {
+                Text("SENSOR").font(.system(size: 11, weight: .semibold)).tracking(0.6).foregroundStyle(.secondary)
+                Text("Reading from CH\(reading.channel) · \(reading.zone)" + (reading.moisture != nil ? " · now \(Int(reading.moisture!))%" : ""))
+                    .font(.subheadline).foregroundStyle(.primary)
+                Button { swapOpen = true } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.left.arrow.right")
+                        Text("Swap readings with another plant")
+                    }
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(DS.brand)
+                }
+                .buttonStyle(.plain)
+                Text("Use this if two sensors were physically swapped and the readings look switched. Channel numbers stay the same.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+
             if reading.status == .noReading {
                 let when = reading.lastSeenAbsolute.map { abs in
                     "Last reported \(abs)" + (reading.lastSeenRelative.map { " (\($0))" } ?? "") + "."
@@ -465,6 +507,78 @@ private struct InfoSheet: View {
             Text(label.uppercased())
                 .font(.system(size: 11, weight: .semibold)).tracking(0.6).foregroundStyle(.secondary)
             Text(body).font(.subheadline).foregroundStyle(.primary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Picker to fix two physically-swapped sensors: choose the other plant and
+/// their readings + care info switch places. No channel numbers involved.
+private struct SwapSensorView: View {
+    let source: Reading
+    let others: [Reading]
+    let performSwap: (Reading) async -> String?   // returns error message, or nil on success
+    let onSwapped: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var busy = false
+    @State private var error: String?
+    @State private var confirm: Reading?
+
+    private var grouped: [(zone: String, rows: [Reading])] {
+        let g = Dictionary(grouping: others) { $0.physicalZone ?? $0.zone }
+        return ["Back Yard", "Side Yards", "Front Yard"].compactMap { z in
+            g[z].map { (zone: z, rows: $0.sorted { $0.channel < $1.channel }) }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Pick the plant whose sensor was swapped with **\(source.name)** (CH\(source.channel)). Their readings and care info switch places so each name shows the right sensor again.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                ForEach(grouped, id: \.zone) { group in
+                    Section(group.zone) {
+                        ForEach(group.rows) { r in
+                            Button { confirm = r } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(r.name).foregroundStyle(.primary)
+                                        Text("CH\(r.channel) · \(r.zone)").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if let m = r.moisture {
+                                        Text("\(Int(m))%").font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
+                                    } else {
+                                        Text("offline").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .disabled(busy)
+                        }
+                    }
+                }
+                if let error { Section { Text(error).font(.footnote).foregroundStyle(DS.bad) } }
+            }
+            .navigationTitle("Swap readings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) } }
+            .overlay { if busy { ProgressView().controlSize(.large).tint(DS.brand) } }
+        }
+        .alert(item: $confirm) { target in
+            Alert(
+                title: Text("Swap \(source.name) ↔ \(target.name)?"),
+                message: Text("\(source.name) and \(target.name) will switch sensors so each shows the right reading. Channel numbers don't change — you can undo by swapping again."),
+                primaryButton: .default(Text("Swap")) {
+                    Task {
+                        busy = true
+                        error = await performSwap(target)
+                        busy = false
+                        if error == nil { onSwapped(); dismiss() }
+                    }
+                },
+                secondaryButton: .cancel()
+            )
         }
     }
 }
@@ -597,13 +711,28 @@ private struct ErrorView: View {
 
 /// Global notification settings sheet (gear icon in toolbar).
 private struct SettingsSheet: View {
+    var onSensorsChanged: () -> Void = {}
     @EnvironmentObject private var prefs: Preferences
     @Environment(\.dismiss) private var dismiss
     @State private var authStatus: UNAuthorizationStatus = .notDetermined
+    @State private var manageOpen = false
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Button { manageOpen = true } label: {
+                        HStack {
+                            Image(systemName: "sensor.tag.radiowaves.forward")
+                                .foregroundStyle(DS.brand)
+                            Text("Add / manage sensors").foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(.tertiary)
+                        }
+                    }
+                } footer: {
+                    Text("Paired a new sensor? Add and label it here — no need to wait on anyone.")
+                }
                 Section("When to alert") {
                     ForEach(Preferences.NotifyMode.allCases) { mode in
                         Button {
@@ -648,13 +777,16 @@ private struct SettingsSheet: View {
                     }
                 }
             }
-            .navigationTitle("Notifications")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+        .sheet(isPresented: $manageOpen) {
+            ManageSensorsView(onChanged: onSensorsChanged)
         }
         .task { await refreshAuth() }
     }

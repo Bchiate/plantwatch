@@ -1,43 +1,7 @@
 import SwiftUI
 
-// Plant types the user can pick during setup (keys must match the backend catalog).
-let SPECIES_OPTIONS: [(key: String, label: String)] = [
-    ("citrus", "Citrus (orange, lemon, lime…)"),
-    ("avocado", "Avocado"),
-    ("camellia", "Camellia"),
-    ("hydrangea", "Hydrangea"),
-    ("rosemary", "Rosemary"),
-    ("lavender", "Lavender"),
-    ("westringia", "Westringia (coast rosemary)"),
-    ("bay_laurel", "Bay Laurel"),
-    ("star_jasmine", "Star Jasmine"),
-    ("boxwood", "Boxwood"),
-    ("convolvulus", "Convolvulus (silverbush)"),
-    ("unknown", "Other / not sure"),
-]
-
-fileprivate struct DiscoveredChannel: Decodable, Identifiable {
-    let channel: Int; let moisture: Double?; let battery: Double?
-    var id: Int { channel }
-}
-fileprivate struct DiscoveredGateway: Decodable, Identifiable {
-    let mac: String; let name: String; let station_type: String?
-    let latitude: Double?; let longitude: Double?
-    let channels: [DiscoveredChannel]
-    var id: String { mac }
-}
-fileprivate struct DevicesResponse: Decodable { let gateways: [DiscoveredGateway]?; let error: String? }
-
-struct PlantDraft: Identifiable {
-    let id = UUID()
-    let mac: String
-    let gatewayName: String
-    let channel: Int
-    let moisture: Double?
-    var name: String
-    var species: String
-    var zone: String
-}
+// Plant types are now provided by SpeciesCatalog (data-driven) and presented via
+// SpeciesPicker, so this view no longer hardcodes the list.
 
 @MainActor
 final class OnboardingModel: ObservableObject {
@@ -47,23 +11,20 @@ final class OnboardingModel: ObservableObject {
     @Published var apiKey = ""
     @Published var error: String?
     @Published var busy = false
-    @Published fileprivate private(set) var gateways: [DiscoveredGateway] = []
+    @Published private(set) var gateways: [DiscoveredGateway] = []
     @Published var drafts: [PlantDraft] = []
 
     func discover() async {
         error = nil; busy = true; defer { busy = false }
         do {
-            let data = try await Auth.shared.authed("functions/v1/ecowitt-devices", method: "POST",
-                json: ["app_key": appKey.trimmingCharacters(in: .whitespaces),
-                       "api_key": apiKey.trimmingCharacters(in: .whitespaces), "save": true])
-            let resp = try JSONDecoder().decode(DevicesResponse.self, from: data)
-            if let e = resp.error { throw Auth.AuthError.message(e) }
-            let gws = resp.gateways ?? []
+            let gws = try await SensorService.discover(
+                appKey: appKey.trimmingCharacters(in: .whitespaces),
+                apiKey: apiKey.trimmingCharacters(in: .whitespaces))
             if gws.isEmpty { throw Auth.AuthError.message("No devices found on that Ecowitt account.") }
             gateways = gws
             drafts = gws.flatMap { g in g.channels.map { c in
                 PlantDraft(mac: g.mac, gatewayName: g.name, channel: c.channel, moisture: c.moisture,
-                           name: "", species: "unknown", zone: g.name)
+                           name: "", species: "unknown", zone: GardenZone.normalize(g.name))
             }}
             step = .organize
         } catch { self.error = error.localizedDescription }
@@ -72,48 +33,7 @@ final class OnboardingModel: ObservableObject {
     func finish(onDone: @escaping () -> Void) async {
         error = nil; busy = true; defer { busy = false }
         do {
-            guard let uid = Auth.shared.userId else { throw Auth.AuthError.message("Not signed in") }
-
-            // 1) Zones (unique names)
-            var zoneNames: [String] = []
-            for d in drafts { let z = d.zone.trimmingCharacters(in: .whitespaces); let n = z.isEmpty ? "My Garden" : z; if !zoneNames.contains(n) { zoneNames.append(n) } }
-            let zoneBody = zoneNames.enumerated().map { ["user_id": uid, "name": $0.element, "sort": $0.offset] as [String: Any] }
-            let zoneData = try await Auth.shared.authed("rest/v1/zones?select=id,name", method: "POST",
-                json: zoneBody, prefer: "return=representation")
-            let zones = try JSONSerialization.jsonObject(with: zoneData) as? [[String: Any]] ?? []
-            var zoneId: [String: Int] = [:]
-            for z in zones { if let n = z["name"] as? String, let i = z["id"] as? Int { zoneId[n] = i } }
-
-            // 2) Gateways
-            let gwBody = gateways.map { ["user_id": uid, "mac": $0.mac, "name": $0.name, "station_type": $0.station_type ?? ""] as [String: Any] }
-            let gwData = try await Auth.shared.authed("rest/v1/gateways?select=id,mac", method: "POST",
-                json: gwBody, prefer: "return=representation,resolution=merge-duplicates")
-            let gws = try JSONSerialization.jsonObject(with: gwData) as? [[String: Any]] ?? []
-            var gwId: [String: Int] = [:]
-            for g in gws { if let m = g["mac"] as? String, let i = g["id"] as? Int { gwId[m] = i } }
-
-            // 3) Plants
-            var order = 0
-            let plantBody: [[String: Any]] = drafts.map { d in
-                order += 1
-                let nm = d.name.trimmingCharacters(in: .whitespaces)
-                let zn = d.zone.trimmingCharacters(in: .whitespaces)
-                var row: [String: Any] = [
-                    "user_id": uid, "gateway_id": gwId[d.mac] as Any, "channel": d.channel,
-                    "name": nm.isEmpty ? "CH\(d.channel)" : nm, "species": d.species, "display_order": order,
-                ]
-                if let zid = zoneId[zn.isEmpty ? "My Garden" : zn] { row["zone_id"] = zid }
-                return row
-            }
-            if !plantBody.isEmpty {
-                _ = try await Auth.shared.authed("rest/v1/plants", method: "POST",
-                    json: plantBody, prefer: "resolution=merge-duplicates,return=minimal")
-            }
-
-            // 4) Mark onboarded
-            _ = try await Auth.shared.authed("rest/v1/profiles?id=eq.\(uid)", method: "PATCH",
-                json: ["onboarded": true], prefer: "return=minimal")
-
+            try await SensorService.save(drafts: drafts, gateways: gateways, markOnboarded: true)
             onDone()
         } catch { self.error = error.localizedDescription }
     }
@@ -171,10 +91,8 @@ struct OnboardingView: View {
                                 Text("CH\(model.drafts[i].channel)\(model.drafts[i].moisture != nil ? " · \(Int(model.drafts[i].moisture!))%" : "")")
                                     .font(.caption).foregroundStyle(.secondary)
                                 TextField("Plant name", text: $model.drafts[i].name).textFieldStyle(.roundedBorder)
-                                Picker("Type", selection: $model.drafts[i].species) {
-                                    ForEach(SPECIES_OPTIONS, id: \.key) { Text($0.label).tag($0.key) }
-                                }
-                                TextField("Zone", text: $model.drafts[i].zone).textFieldStyle(.roundedBorder)
+                                SpeciesPicker(selection: $model.drafts[i].species)
+                                zonePicker(selection: $model.drafts[i].zone)
                             }
                             .padding(.vertical, 2)
                         }
@@ -189,6 +107,16 @@ struct OnboardingView: View {
             }
             .buttonStyle(.plain).disabled(model.busy)
             .padding(.horizontal, 16).padding(.vertical, 10)
+        }
+    }
+
+    private func zonePicker(selection: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Zone").font(.caption2).foregroundStyle(.secondary)
+            Picker("Zone", selection: selection) {
+                ForEach(GardenZone.all, id: \.self) { Text(GardenZone.short($0)).tag($0) }
+            }
+            .pickerStyle(.segmented)
         }
     }
 

@@ -20,6 +20,10 @@
 		BF000000000000000000000C /* Auth.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR000000000000000000000C /* Auth.swift */; };
 		BF000000000000000000000D /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR000000000000000000000D /* LoginView.swift */; };
 		BF000000000000000000000E /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR000000000000000000000E /* OnboardingView.swift */; };
+		BF000000000000000000000F /* SensorSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR000000000000000000000F /* SensorSetup.swift */; };
+		BF0000000000000000000011 /* ManageSensorsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0000000000000000000011 /* ManageSensorsView.swift */; };
+		BF0000000000000000000012 /* AdminDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0000000000000000000012 /* AdminDashboardView.swift */; };
+		BF0000000000000000000013 /* SpeciesPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0000000000000000000013 /* SpeciesPicker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +42,10 @@
 		FR000000000000000000000C /* Auth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Auth.swift; sourceTree = "<group>"; };
 		FR000000000000000000000D /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		FR000000000000000000000E /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		FR000000000000000000000F /* SensorSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorSetup.swift; sourceTree = "<group>"; };
+		FR0000000000000000000011 /* ManageSensorsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageSensorsView.swift; sourceTree = "<group>"; };
+		FR0000000000000000000012 /* AdminDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminDashboardView.swift; sourceTree = "<group>"; };
+		FR0000000000000000000013 /* SpeciesPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeciesPicker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -70,6 +78,8 @@
 				FR0000000000000000000006 /* PlantReportService.swift */,
 				FR000000000000000000000B /* Preferences.swift */,
 				FR000000000000000000000C /* Auth.swift */,
+				FR000000000000000000000F /* SensorSetup.swift */,
+				FR0000000000000000000013 /* SpeciesPicker.swift */,
 				GR0000000000000000000004 /* Views */,
 				FR0000000000000000000009 /* Assets.xcassets */,
 				FR000000000000000000000A /* Info.plist */,
@@ -92,6 +102,8 @@
 				FR0000000000000000000008 /* PlantCardView.swift */,
 				FR000000000000000000000D /* LoginView.swift */,
 				FR000000000000000000000E /* OnboardingView.swift */,
+				FR0000000000000000000011 /* ManageSensorsView.swift */,
+				FR0000000000000000000012 /* AdminDashboardView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -177,6 +189,10 @@
 				BF000000000000000000000C /* Auth.swift in Sources */,
 				BF000000000000000000000D /* LoginView.swift in Sources */,
 				BF000000000000000000000E /* OnboardingView.swift in Sources */,
+				BF000000000000000000000F /* SensorSetup.swift in Sources */,
+				BF0000000000000000000011 /* ManageSensorsView.swift in Sources */,
+				BF0000000000000000000012 /* AdminDashboardView.swift in Sources */,
+				BF0000000000000000000013 /* SpeciesPicker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

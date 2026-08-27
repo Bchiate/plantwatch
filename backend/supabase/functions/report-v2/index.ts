@@ -41,8 +41,22 @@ const mmToIn = (mm) => mm / 25.4;
 
 async function getGw(appKey, apiKey, mac) {
   const url = `https://api.ecowitt.net/api/v3/device/real_time?application_key=${encodeURIComponent(appKey)}&api_key=${encodeURIComponent(apiKey)}&mac=${encodeURIComponent(mac)}&call_back=all`;
-  const r = await fetch(url); if (!r.ok) return {};
-  const j = await r.json(); return j.code === 0 ? (j.data || {}) : {};
+  // Retry Ecowitt's transient failures (HTTP error, empty/non-JSON body, code
+  // -1 system busy / 45001 too-frequent) — one blip must not render a whole
+  // gateway "No reading" on a 60s auto-refresh and spam offline alerts. Same
+  // posture as guest-report / admin-overview / ecowitt-devices.
+  for (let i = 0; i < 3; i++) {
+    try {
+      const r = await fetch(url);
+      if (r.ok) {
+        const j = await r.json().catch(() => null);
+        if (j && j.code === 0 && j.data && Object.keys(j.data).length) return j.data;
+        if (j && j.code !== 0 && j.code !== -1 && j.code !== 45001) return {};   // definitive error (bad key/mac) — don't retry
+      }
+    } catch (_) {}
+    if (i < 2) await new Promise(res => setTimeout(res, 500 * (i + 1)));
+  }
+  return {};
 }
 async function getWx(lat, lon) {
   if (lat == null || lon == null) return null;
@@ -242,10 +256,28 @@ Deno.serve(async (req) => {
         watering_recommendation: plan?.text ?? null, watering_target_pct: plan?.target_pct ?? null };
     });
 
-    // Last-seen enrichment for offline sensors.
-    await Promise.all(readings.filter(r => r.status === "no_reading").map(async (r) => {
-      const gw = (gateways||[]).find(g => g.name === r.zone); if (!gw) return;
-      r.last_seen = (await lastValidTs(eco.app_key, eco.api_key, gw.mac, r.channel, 3)) || (await lastValidTs(eco.app_key, eco.api_key, gw.mac, r.channel, 90));
+    // Last-seen enrichment for offline sensors — bounded so a hub outage
+    // (every sensor on a gateway "offline" at once) can't fan out into dozens
+    // of slow Ecowitt history calls, time the report out, and trip Ecowitt's
+    // rate limit right when it's already struggling.
+    const offline = readings.filter(r => r.status === "no_reading");
+    const offlineByGw = {}, totalByGw = {};
+    for (const r of readings) totalByGw[r.zone] = (totalByGw[r.zone] || 0) + 1;
+    for (const r of offline) (offlineByGw[r.zone] ??= []).push(r);
+    await Promise.all(Object.entries(offlineByGw).map(async ([gwName, rs]) => {
+      const gw = (gateways||[]).find(g => g.name === gwName); if (!gw) return;
+      // Whole gateway dark (>=2 sensors, all offline) → hub-level outage: one
+      // shared lookup, since every sensor stopped at the same moment.
+      if (rs.length >= 2 && rs.length === totalByGw[gwName]) {
+        const ts = await lastValidTs(eco.app_key, eco.api_key, gw.mac, rs[0].channel, 3);
+        for (const r of rs) r.last_seen = ts;
+        return;
+      }
+      // Individual dropouts: cap the fan-out; sensors past the cap just show
+      // no last-seen rather than slowing the whole report.
+      await Promise.all(rs.slice(0, 6).map(async (r) => {
+        r.last_seen = (await lastValidTs(eco.app_key, eco.api_key, gw.mac, r.channel, 3)) || (await lastValidTs(eco.app_key, eco.api_key, gw.mac, r.channel, 90));
+      }));
     }));
 
     const counts = { needs_water:0, too_wet:0, good:0, missing:0 };

@@ -8,18 +8,8 @@ final class Auth: ObservableObject {
     static let shared = Auth()
 
     @Published private(set) var session: Session?
-    /// True when the signed-in account is an admin (routes to the admin dashboard).
-    @Published private(set) var isAdmin = false
     var isAuthed: Bool { session != nil }
     var email: String? { session?.user.email }
-
-    /// Fetch the admin flag for the current user from their profile.
-    func loadAdminFlag() async {
-        guard isAuthed else { isAdmin = false; return }
-        guard let d = try? await authed("rest/v1/profiles?select=is_admin"),
-              let rows = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { return }
-        isAdmin = (rows.first?["is_admin"] as? Bool) ?? false
-    }
 
     struct User: Codable { let id: String; let email: String? }
     struct Session: Codable {
@@ -44,7 +34,6 @@ final class Auth: ObservableObject {
     }
     func signOut() {
         session = nil
-        isAdmin = false
         UserDefaults.standard.removeObject(forKey: key)
     }
 
@@ -97,41 +86,28 @@ final class Auth: ObservableObject {
         return false  // confirmation email sent
     }
 
-    /// Refresh the session. Signs out ONLY when the server explicitly rejects
-    /// the refresh token (400/401) — i.e. the session is genuinely dead. Network
-    /// errors / 5xx keep the session so a brief outage never logs the user out.
     @discardableResult
-    func refresh() async -> Bool {
+    private func refresh() async -> Bool {
         guard let rt = session?.refresh_token else { return false }
         do {
-            var req = URLRequest(url: URL(string: "\(Config.supabaseUrl)/auth/v1/token?grant_type=refresh_token")!)
-            req.httpMethod = "POST"
-            req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = try JSONSerialization.data(withJSONObject: ["refresh_token": rt])
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            if code == 200, let s = try? JSONDecoder().decode(Session.self, from: data) { save(s); return true }
-            if code == 400 || code == 401 { signOut() }   // refresh token is truly invalid
-            return false                                  // transient (5xx / network) → keep session
+            save(try await gotrue("token?grant_type=refresh_token", body: ["refresh_token": rt]))
+            return true
+        } catch is URLError {
+            // Offline or timed out: keep the session and try again on the next request.
+            return false
         } catch {
-            return false                                  // network error → keep session, retry later
+            // Supabase rejected the refresh token, so the session is over.
+            signOut()
+            return false
         }
     }
 
-    /// A valid access token, refreshing if it's about to expire. On a transient
-    /// refresh failure it returns the current token (if not hard-expired) rather
-    /// than nil, so callers don't treat a blip as "signed out".
+    /// A valid access token, refreshing if it's about to expire.
     func accessToken() async -> String? {
         guard let s = session else { return nil }
-        let exp = s.expires_at ?? 0
-        let now = Date().timeIntervalSince1970
-        if now > exp - 60 {
-            if await refresh() { return session?.access_token }
-            if now < exp { return session?.access_token }   // still valid → keep using it
-            return nil
-        }
-        return s.access_token
+        let expMs = (s.expires_at ?? 0)
+        if Date().timeIntervalSince1970 > expMs - 60 { if !(await refresh()) { return nil } }
+        return session?.access_token
     }
 
     var userId: String? { session?.user.id }

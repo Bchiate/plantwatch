@@ -1,32 +1,32 @@
-# Environment / secrets — never commit these
+# Local configuration and secrets: never commit these
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 *.secret
+web/config.js
+ios/Secrets.xcconfig
+
+# Tool caches and test output
+.cache/
+node_modules/
+e2e/test-results/
+e2e/playwright-report/
 
 # Supabase local dev
 backend/supabase/.branches/
 backend/supabase/.temp/
-**/.temp/
 
 # macOS
 .DS_Store
-**/.DS_Store
 ._*
 
 # Xcode
-ios/**/*.xcodeproj/xcuserdata/
+ios/**/xcuserdata/
 ios/**/DerivedData/
-ios/**/*.xccheckout
-ios/**/*.moved-aside
-ios/**/*.pbxuser
-ios/**/*.mode1v3
-ios/**/*.mode2v3
-ios/**/*.perspectivev3
-ios/**/*.xcworkspace/xcuserdata/
-
-# iOS build artefacts
 ios/build/
-
-# Node (if you ever run local tooling)
-node_modules/
+*.xccheckout
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3

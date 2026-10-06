@@ -9,7 +9,7 @@ final class Preferences: ObservableObject {
 
     @Published var overrides:     [String: Override] = [:]
     @Published var nameOverrides: [String: String]  = [:]   // id → custom display name
-    @Published var zoneOverrides: [String: String]  = [:]   // id → "Back Yard" / "Side Yards" / "Front Yard"
+    @Published var zoneOverrides: [String: String]  = [:]   // id → zone name
     @Published var zoneOrder:     [String: [String]] = [:]  // zone → [id, id, ...] custom drag order
     @Published var notifyMode:    NotifyMode         = .off
     @Published var notifyOffline: Bool               = false
@@ -98,7 +98,7 @@ final class Preferences: ObservableObject {
         return i
     }
 
-    /// Home (gateway) zone for a plant id like "Back Yard-4".
+    /// Home (gateway) zone for a plant id like "Garden hub-4".
     private func homeZone(_ id: String) -> String {
         if let r = id.range(of: "-", options: .backwards) { return String(id[..<r.lowerBound]) }
         return id
@@ -133,22 +133,6 @@ final class Preferences: ObservableObject {
         UserDefaults.standard.set(on, forKey: kNotifyOffline)
     }
     func isNotifyOn(_ id: String) -> Bool { notifyPlants.contains(id) }
-
-    /// Swap all device-local customizations between two plant ids. Used when two
-    /// sensors are swapped so each plant's name/range/zone/alert settings follow
-    /// it to the channel it now reads from.
-    func swapLocalKeys(_ a: String, _ b: String) {
-        guard a != b else { return }
-        func swapEntry<T>(_ d: inout [String: T]) { let t = d[a]; d[a] = d[b]; d[b] = t }
-        swapEntry(&overrides)
-        swapEntry(&nameOverrides)
-        swapEntry(&zoneOverrides)
-        swapEntry(&lastStatus)
-        let aOn = notifyPlants.contains(a), bOn = notifyPlants.contains(b)
-        if bOn { notifyPlants.insert(a) } else { notifyPlants.remove(a) }
-        if aOn { notifyPlants.insert(b) } else { notifyPlants.remove(b) }
-        saveOverrides(); saveNames(); saveZones(); saveLastStatus(); saveNotifyPlants()
-    }
 
     /// Classify a moisture value against a low/high band.
     private func classify(_ m: Double, low: Int, high: Int) -> (Status, String, Bool) {

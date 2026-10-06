@@ -25,9 +25,9 @@ enum DS {
         let n = name.lowercased()
         if n.contains("lemon")                                      { return "🍋" }
         if n.contains("lime")                                       { return "🍐" }
-        if n.contains("grapefruit") || n.contains("oro blanco")     { return "🍈" }
+        if n.contains("grapefruit")                                 { return "🍈" }
         if n.contains("tangerine") || n.contains("mandarin")
-            || n.contains("orange") || n.contains("cara cara")      { return "🍊" }
+            || n.contains("orange")                                 { return "🍊" }
         if n.contains("avocado")                                    { return "🥑" }
         if n.contains("hydrangea")                                  { return "💐" }
         if n.contains("camelia") || n.contains("camellia")
@@ -36,7 +36,7 @@ enum DS {
         if n.contains("lavender")                                   { return "💜" }
         if n.contains("westringia")                                 { return "🌾" }
         if n.contains("bay laurel") || n.contains("boxwood")        { return "🌳" }
-        if n.contains("convolvulus") || n.contains("convovulos")    { return "🌱" }
+        if n.contains("convolvulus")                                { return "🌱" }
         switch type {
         case "citrus":         return "🍊"
         case "avocado":        return "🥑"

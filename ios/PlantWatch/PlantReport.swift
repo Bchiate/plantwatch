@@ -112,7 +112,7 @@ struct SpeciesPreset: Decodable, Identifiable, Hashable {
 struct Reading: Decodable, Identifiable {
     var id: String { "\(zone)-\(channel)" }
 
-    let zone:                  String     // gateway name (Back Yard / Side Yards)
+    let zone:                  String     // gateway name
     let channel:               Int
     let displayOrder:          Int?
     var physicalZone:          String?    // physical location — mutable for local zone override
@@ -180,7 +180,7 @@ struct Reading: Decodable, Identifiable {
     }
     /// "Last seen 2 hours ago" style string for offline sensors.
     var lastSeenRelative: String? { lastSeenDate?.relative() }
-    /// Absolute "Sat, May 30, 5:30 PM" style.
+    /// Absolute "Tue, Mar 4, 5:30 PM" style.
     var lastSeenAbsolute: String? {
         guard let d = lastSeenDate else { return nil }
         let f = DateFormatter()

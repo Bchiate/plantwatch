@@ -13,6 +13,23 @@ PlantWatch turns readings from Ecowitt soil-moisture sensors into per-plant wate
 
 The screenshots show demo mode: a fictional garden with sample readings, evaluated by the real advice engine.
 
+## In use
+
+PlantWatch has run my family's garden since May 2026: more than 24 soil sensors across the back, side and front yards. Since the garden switched to its watering advice, the household's water bill is down about 25%, as reported by the person who pays it.
+
+## How this was built
+
+I built PlantWatch by directing AI coding tools (Claude Code). I decided what it should do and how it should behave, used my family's garden as the test bed, and directed the AI through the implementation and the fixes. Most commits carry the co-author lines.
+
+The commit history is reconstructed from my private working repo. Dates and order are unchanged; credentials and personal details were replaced with placeholders before publishing.
+
+- **May 25–30, 2026.** First release for one garden, then more than a dozen iOS builds in five days as it met real use: sensor dropouts, offline alerts, per-plant overrides.
+- **May 30.** Rebuilt as multi-tenant: sign-in, per-user data isolated by Postgres row-level security, authenticated functions (v2.0 and v2.1).
+- **August.** In the private version: security hardening, an admin dashboard, read-only sharing for guests, and retries for flaky sensor-API calls.
+- **October 6.** The public release: one large cleanup pass that restructured the code and added the tests, CI and demo mode. It leaves out the admin dashboard, guest sharing and the sensor-API retries, which have not been ported yet.
+
+The full list is in [CHANGELOG.md](CHANGELOG.md).
+
 ## Try the demo
 
 No account or backend needed:

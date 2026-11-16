@@ -4,6 +4,10 @@ Dates are when the work was committed. Version numbers are the iOS app's.
 
 Entries before the public release describe the private working version. The public version leaves out the admin dashboard and guest sharing.
 
+## 2026-11-16
+
+- iOS: the session is kept in the Keychain instead of UserDefaults. A session saved by an earlier version is moved over on first launch.
+
 ## 2026-11-15
 
 - Ported the Ecowitt retries from the private version. A request that fails in a way that can clear on its own (a dropped connection, a 5xx or 429, an unreadable body, Ecowitt's busy codes) is tried up to three times. Rejected keys, unknown gateways and timeouts are not retried.

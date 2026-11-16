@@ -124,6 +124,7 @@ Earlier versions of the project had three copies of this table that disagreed. T
 - **Atomic, idempotent onboarding.** `complete_onboarding()` is a `SECURITY DEFINER` function with an empty `search_path`. It validates the whole payload, then upserts gateways, zones and plants and marks the profile onboarded in one transaction, so a failure leaves nothing half-written and a retry is safe. `anon` cannot call it.
 - **Failures are explicit.** A rejected Ecowitt key is reported as such rather than as every sensor being offline, and database errors return 502 rather than sending the user back to onboarding.
 - **Web client hardening.** A Content-Security-Policy with no inline scripts, HTML-escaping of every server and sensor string (checked with an injection payload in browser tests), and no third-party requests (fonts are self-hosted). The user is signed out only when Supabase rejects the refresh token, not when the network blips.
+- **The iOS app keeps its session in the Keychain.** The session includes the refresh token, so it is stored encrypted at rest, readable only by the app, and left out of backups and device transfers.
 - **Location privacy.** Forecast coordinates are rounded to 0.01° (about 1 km) before they are sent to Open-Meteo.
 
 The database tests in [`backend/supabase/tests/db_test.ts`](backend/supabase/tests/db_test.ts) run the real migrations against Postgres (PGlite, compiled to WebAssembly) as the `authenticated` and `anon` roles, so these policies are exercised, not just written. One test applies only the original migration and shows that the cross-tenant insert and the admin self-grant succeed there; the others show they are rejected now.
@@ -220,13 +221,12 @@ The commit history is a cleaned-up copy of my private working repo, with the ori
 
 **iOS app.** The iOS client has not been updated to match the web client yet, and it is not built in CI.
 
-- Session tokens are stored in `UserDefaults` rather than the Keychain. Being offline no longer signs the user out, but any error response to a token refresh (including a server error) still does.
+- Being offline does not sign the user out, but any error response to a token refresh (including a server error) does.
 - Plant names, ranges, zones, order and alert choices edited on iOS are stored on the device only, and the zone filter chips are fixed to three zone names (plants in other zones still appear under "All").
 - Onboarding uses four separate REST writes instead of `complete_onboarding()`; a retry after a partial failure can stop with a conflict.
 
 **Backend.**
 
-- Ecowitt keys are stored in plaintext in Postgres, readable only by their owner through RLS. Supabase Vault would be better.
 - Every report request calls Ecowitt and Open-Meteo; there is no caching or rate limiting yet.
 - Soil-moisture percentages depend on soil type and probe placement, so the species bands are starting points; per-plant ranges exist for that reason.
 - US units only (°F, inches, gallons).
@@ -235,7 +235,7 @@ The commit history is a cleaned-up copy of my private working repo, with the ori
 
 ## Roadmap
 
-- Bring the iOS app in line with the web client: Keychain storage, the same refresh rules, settings saved to the database, onboarding through the RPC, zones from the report.
+- Bring the iOS app in line with the web client: the same refresh rules, settings saved to the database, onboarding through the RPC, zones from the report.
 - A scheduled function that stores readings, for drying-rate trends and push notifications that do not need an open app.
 - Heat and evapotranspiration in the advice, not just rain.
 - Ecowitt keys in Supabase Vault.

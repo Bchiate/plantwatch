@@ -1,5 +1,46 @@
 import Foundation
+import Security
 import SwiftUI
+
+/// Where the signed-in session is kept between launches: the Keychain.
+///
+/// The session holds a refresh token, which is as good as the password until it
+/// is revoked. In the Keychain it is encrypted at rest, readable only by this
+/// app, and left out of backups and device transfers (`ThisDeviceOnly`).
+/// `AfterFirstUnlock` lets a background refresh read it while the phone is locked.
+private enum SessionStore {
+    private static let query: [CFString: Any] = [
+        kSecClass: kSecClassGenericPassword,
+        kSecAttrService: "PlantWatch",
+        kSecAttrAccount: "supabase-session",
+    ]
+
+    static func load() -> Data? {
+        var q = query
+        q[kSecReturnData] = true
+        q[kSecMatchLimit] = kSecMatchLimitOne
+        var found: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &found) == errSecSuccess else { return nil }
+        return found as? Data
+    }
+
+    @discardableResult
+    static func save(_ data: Data) -> Bool {
+        let values: [CFString: Any] = [
+            kSecValueData: data,
+            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let status = SecItemUpdate(query as CFDictionary, values as CFDictionary)
+        if status == errSecItemNotFound {
+            return SecItemAdd(query.merging(values) { $1 } as CFDictionary, nil) == errSecSuccess
+        }
+        return status == errSecSuccess
+    }
+
+    static func delete() {
+        SecItemDelete(query as CFDictionary)
+    }
+}
 
 /// Manages the Supabase auth session: sign-in / sign-up, token refresh, and a
 /// persisted session so the user stays logged in until they sign out.
@@ -19,10 +60,26 @@ final class Auth: ObservableObject {
         var user: User
     }
 
-    private let key = "pw-session"
+    /// Where versions before the Keychain kept the session, in UserDefaults.
+    private let legacyKey = "pw-session"
+    private let installedKey = "pw-installed"
 
     private init() {
-        if let data = UserDefaults.standard.data(forKey: key),
+        let defaults = UserDefaults.standard
+
+        // An update from a version that kept the session in UserDefaults: move it
+        // to the Keychain and remove the plaintext copy, so the user stays signed in.
+        if let old = defaults.data(forKey: legacyKey) {
+            if (try? JSONDecoder().decode(Session.self, from: old)) != nil { SessionStore.save(old) }
+            defaults.removeObject(forKey: legacyKey)
+        } else if !defaults.bool(forKey: installedKey) {
+            // First launch of a fresh install. Keychain items outlive a deleted
+            // app, so drop any session a previous install left behind.
+            SessionStore.delete()
+        }
+        defaults.set(true, forKey: installedKey)
+
+        if let data = SessionStore.load(),
            let s = try? JSONDecoder().decode(Session.self, from: data) {
             session = s
         }
@@ -30,11 +87,11 @@ final class Auth: ObservableObject {
 
     private func save(_ s: Session) {
         session = s
-        if let d = try? JSONEncoder().encode(s) { UserDefaults.standard.set(d, forKey: key) }
+        if let d = try? JSONEncoder().encode(s) { SessionStore.save(d) }
     }
     func signOut() {
         session = nil
-        UserDefaults.standard.removeObject(forKey: key)
+        SessionStore.delete()
     }
 
     enum AuthError: LocalizedError {

@@ -11,7 +11,7 @@ Entries before the public release describe the private working version. The publ
 
 ## Public release (2026-10-06)
 
-- Cleaned-up public version of the private working repo: restructured layout, tests, CI, a demo mode and documentation. It left out the Ecowitt retries and the limit on last-seen lookups, which came back on 2026-11-15.
+- Public version of my private working repo: restructured layout, tests, CI, a demo mode and documentation.
 
 ## 2026-08-27
 

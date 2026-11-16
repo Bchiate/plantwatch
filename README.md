@@ -15,21 +15,7 @@ The screenshots show demo mode: a fictional garden with sample readings, evaluat
 
 ## In use
 
-PlantWatch has run my family's garden since May 2026: more than 24 soil sensors across the back, side and front yards. Since the garden switched to its watering advice, the household's water bill is down about 25%, as reported by the person who pays it.
-
-## How this was built
-
-I built PlantWatch by directing AI coding tools (Claude Code). I decided what it should do and how it should behave, used my family's garden as the test bed, and directed the AI through the implementation and the fixes. Most commits carry the co-author lines.
-
-The commit history is reconstructed from my private working repo. Dates and order are unchanged; credentials and personal details were replaced with placeholders before publishing.
-
-- **May 25–30, 2026.** First release for one garden, then more than a dozen iOS builds in five days as it met real use: sensor dropouts, offline alerts, per-plant overrides.
-- **May 30.** Rebuilt as multi-tenant: sign-in, per-user data isolated by Postgres row-level security, authenticated functions (v2.0 and v2.1).
-- **August.** In the private version: security hardening, an admin dashboard, read-only sharing for guests, and retries for flaky sensor-API calls.
-- **October 6.** The public release: one large cleanup pass that restructured the code and added the tests, CI and demo mode. It left out the admin dashboard, guest sharing and the sensor-API retries.
-- **November 15.** Ported the sensor-API retries and the limit on last-seen lookups back from the private version, with tests. The admin dashboard and guest sharing are still only in the private version.
-
-The full list is in [CHANGELOG.md](CHANGELOG.md).
+PlantWatch has run my family's garden since May 2026: more than 24 soil sensors across the back, side and front yards. Since the garden switched to its watering advice, the household's water bill is down about 25%.
 
 ## Try the demo
 
@@ -217,6 +203,18 @@ cd e2e && npm ci && npx playwright install chromium && npx playwright test   # b
 - **Browser tests** (Playwright, in `e2e/`) run the web client in demo mode, and in live mode against a mocked Supabase API: range edits re-evaluated by the engine, HTML escaping, zone moves, keyboard and pointer reordering, onboarding through the RPC, the exact PATCH payloads and tokens, and the session rules.
 
 GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs all three, checks formatting, lint and types, and verifies that the committed browser bundle matches the TypeScript source.
+
+## How this was built
+
+I designed PlantWatch and built it by directing Claude Code. I decided what it should do and how it should behave, ran it on my family's garden, and fixed what real use broke.
+
+- **May 25–30, 2026.** First release for one garden, then more than a dozen iOS builds in five days as it met real use: sensor dropouts, offline alerts, per-plant overrides.
+- **May 30.** Rebuilt as multi-tenant: sign-in, per-user data isolated by Postgres row-level security, authenticated functions (v2.0 and v2.1).
+- **August.** Security hardening, an admin dashboard, read-only sharing for guests, and retries for flaky sensor-API calls.
+- **October 6.** The public release: restructured code, tests, CI and demo mode.
+- **November 15.** The sensor-API retries and a limit on last-seen lookups ported into this repository, with tests.
+
+The commit history is a cleaned-up copy of my private working repo, with the original dates and order. The admin dashboard and guest sharing run in my own deployment and are not in this repository yet. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Known limitations
 

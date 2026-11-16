@@ -7,7 +7,8 @@
  *    query to their own rows.
  * 3. Fetch live readings per gateway and the forecast, in parallel. A gateway
  *    whose request fails in a way that can clear on its own is tried again.
- * 4. Look up last-seen times for sensors that are not reporting.
+ * 4. Look up last-seen times for sensors that are not reporting: one shared
+ *    lookup when a whole hub is down, a capped number otherwise.
  * 5. Build the report with the shared, pure advice engine.
  */
 
@@ -24,8 +25,8 @@ import {
   buildReport,
   type GatewayResult,
   type GatewayRow,
+  planLastSeenLookups,
   type PlantRow,
-  plantsAwaitingLastSeen,
   type ZoneRow,
 } from "../_shared/report.ts";
 import { getUser, HttpError, restClient, type SupabaseEnv } from "../_shared/supabase.ts";
@@ -102,17 +103,18 @@ export function createReportHandler(deps: ReportDeps): (req: Request) => Promise
       const gatewaysById = new Map(gateways.map((g) => [g.id, g]));
       const lastSeen: Record<number, string | null> = {};
       await Promise.all(
-        plantsAwaitingLastSeen(plants, gatewayResults).map(async (plant) => {
-          const gateway = gatewaysById.get(plant.gateway_id);
+        planLastSeenLookups(plants, gatewayResults).map(async (lookup) => {
+          const gateway = gatewaysById.get(lookup.gatewayId);
           if (!gateway) return;
-          lastSeen[plant.id] = await fetchLastSeen(
+          const seen = await fetchLastSeen(
             deps.fetch,
             creds,
             gateway.mac,
-            plant.channel,
+            lookup.channel,
             now,
             gateway.timezone,
           );
+          for (const id of lookup.plantIds) lastSeen[id] = seen;
         }),
       );
 

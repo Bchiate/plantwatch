@@ -61,7 +61,7 @@ Both functions are thin handlers around shared modules in `backend/supabase/func
 
 Handlers take `fetch`, the environment and a clock as parameters, which is how the tests exercise them without a network.
 
-**`report-v2`** (`GET`) returns the signed-in user's report, or `{ needs_onboarding: true }` when they have no Ecowitt keys or no plants. If a gateway cannot be read (for example because Ecowitt rejects the keys), its plants report `status: "no_reading"` with `headline: "No data"` and an `offline_cause` explaining why, and the report lists the failure in `source_errors`. A sensor that is simply silent gets `last_seen` from Ecowitt's history API instead.
+**`report-v2`** (`GET`) returns the signed-in user's report, or `{ needs_onboarding: true }` when they have no Ecowitt keys or no plants. If a gateway cannot be read (for example because Ecowitt rejects the keys), its plants report `status: "no_reading"` with `headline: "No data"` and an `offline_cause` explaining why, and the report lists the failure in `source_errors`. A sensor that is simply silent gets `last_seen` from Ecowitt's history API instead. Those lookups are limited: a gateway whose sensors are all silent gets one shared lookup, and otherwise at most six per gateway.
 
 **`ecowitt-devices`** (`POST { app_key, api_key, save }`) validates Ecowitt keys by listing the account's gateways, returns each gateway's active soil channels for the setup screen, and with `save: true` stores keys that worked.
 

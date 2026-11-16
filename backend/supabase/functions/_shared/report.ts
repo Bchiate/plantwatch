@@ -272,6 +272,55 @@ export function plantsAwaitingLastSeen(
   });
 }
 
+/** Individual last-seen lookups allowed per gateway in one report. */
+export const LAST_SEEN_LOOKUPS_PER_GATEWAY = 6;
+
+/** One history lookup and the plants that share its answer. */
+export interface LastSeenLookup {
+  gatewayId: number;
+  channel: number;
+  plantIds: number[];
+}
+
+/**
+ * The last-seen lookups one report makes, bounded so that a hub outage cannot
+ * turn into dozens of slow history calls that delay the report and run into
+ * Ecowitt's rate limit.
+ *
+ * - Every plant on a gateway is quiet (two or more): the hub itself is down
+ *   and its sensors stopped together, so one lookup answers for all of them.
+ *   The first plant's channel stands in for the hub.
+ * - Otherwise each quiet plant gets its own lookup, up to
+ *   LAST_SEEN_LOOKUPS_PER_GATEWAY. Plants past the cap show no last-seen time.
+ */
+export function planLastSeenLookups(
+  plants: PlantRow[],
+  gatewayResults: Record<number, GatewayResult>,
+): LastSeenLookup[] {
+  const plantsPerGateway = new Map<number, number>();
+  for (const plant of plants) {
+    plantsPerGateway.set(plant.gateway_id, (plantsPerGateway.get(plant.gateway_id) ?? 0) + 1);
+  }
+  const quietByGateway = new Map<number, PlantRow[]>();
+  for (const plant of plantsAwaitingLastSeen(plants, gatewayResults)) {
+    const quiet = quietByGateway.get(plant.gateway_id) ?? [];
+    quiet.push(plant);
+    quietByGateway.set(plant.gateway_id, quiet);
+  }
+
+  const lookups: LastSeenLookup[] = [];
+  for (const [gatewayId, quiet] of quietByGateway) {
+    if (quiet.length >= 2 && quiet.length === plantsPerGateway.get(gatewayId)) {
+      lookups.push({ gatewayId, channel: quiet[0].channel, plantIds: quiet.map((p) => p.id) });
+      continue;
+    }
+    for (const plant of quiet.slice(0, LAST_SEEN_LOOKUPS_PER_GATEWAY)) {
+      lookups.push({ gatewayId, channel: plant.channel, plantIds: [plant.id] });
+    }
+  }
+  return lookups;
+}
+
 function isReading(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }

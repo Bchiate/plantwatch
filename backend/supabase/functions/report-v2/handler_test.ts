@@ -220,6 +220,32 @@ Deno.test("report-v2: an Ecowitt blip is retried instead of blanking the gateway
   assertEquals(liveCalls("00:00:5E:00:53:02"), 1, "rejected keys are not retried");
 });
 
+Deno.test("report-v2: a hub outage makes one shared last-seen lookup", async () => {
+  const gardenHub = "00:00:5E:00:53:01";
+  const dark: Route = (call) => {
+    if (call.url.searchParams.get("mac") !== gardenHub) return undefined;
+    if (call.url.pathname.endsWith("/real_time")) {
+      return jsonResponse({ code: 0, msg: "success", data: [] });
+    }
+    return jsonResponse({
+      code: 0,
+      msg: "success",
+      data: { soil_ch1: { soilmoisture: { list: { "1791100000": "40" } } } },
+    });
+  };
+  const { handler, calls } = setup(defaultDb(), dark);
+  const report = await (await handler(get())).json() as Report;
+
+  const wentQuiet = new Date(1791100000 * 1000).toISOString();
+  for (const name of ["Lemon tree", "Mandarin"]) {
+    const reading = report.readings.find((r) => r.name === name)!;
+    assertEquals([reading.status, reading.last_seen], ["no_reading", wentQuiet], name);
+  }
+  // Two quiet plants, one history lookup between them.
+  const history = calls.filter((c) => c.url.pathname.endsWith("/device/history"));
+  assertEquals(history.map((c) => c.url.searchParams.get("call_back")), ["soil_ch1"]);
+});
+
 Deno.test("report-v2: new users are sent to onboarding", async () => {
   const noKeys = setup({ ...defaultDb(), ecowitt_accounts: [] });
   const a = await (await noKeys.handler(get())).json();

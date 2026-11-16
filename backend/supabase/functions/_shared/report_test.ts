@@ -5,6 +5,8 @@ import {
   emptyWeather,
   type GatewayResult,
   type GatewayRow,
+  LAST_SEEN_LOOKUPS_PER_GATEWAY,
+  planLastSeenLookups,
   type PlantRow,
   plantsAwaitingLastSeen,
   reassess,
@@ -146,6 +148,46 @@ Deno.test("plantsAwaitingLastSeen: only quiet channels on reachable gateways", (
     plantsAwaitingLastSeen(PLANTS, results).map((p) => p.id);
   assertEquals(ids(input().gatewayResults), [4]);
   assertEquals(ids({ 1: AUTH_FAILURE }), [], "failed or unknown gateways are skipped");
+});
+
+Deno.test("planLastSeenLookups: one per dropout, one shared for a dark hub, capped", () => {
+  const live = (...channels: number[]): GatewayResult => ({
+    ok: true,
+    channels: Object.fromEntries(channels.map((ch) => [ch, { moisture: 40, battery: 1.5 }])),
+  });
+  const onHub = (count: number, gateway_id = 1, firstId = 1) =>
+    Array.from(
+      { length: count },
+      (_, i) => plant({ id: firstId + i, channel: i + 1, gateway_id }),
+    );
+
+  // One dropout among live sensors gets its own lookup.
+  assertEquals(planLastSeenLookups(onHub(3), { 1: live(1, 3) }), [
+    { gatewayId: 1, channel: 2, plantIds: [2] },
+  ]);
+
+  // The whole hub is quiet: one lookup, shared by every plant on it.
+  assertEquals(planLastSeenLookups(onHub(3), { 1: live() }), [
+    { gatewayId: 1, channel: 1, plantIds: [1, 2, 3] },
+  ]);
+
+  // A hub with a single plant is an ordinary dropout.
+  assertEquals(planLastSeenLookups(onHub(1), { 1: live() }), [
+    { gatewayId: 1, channel: 1, plantIds: [1] },
+  ]);
+
+  // Many dropouts, but not the whole hub: capped.
+  const capped = planLastSeenLookups(onHub(9), { 1: live(9) });
+  assertEquals(capped.length, LAST_SEEN_LOOKUPS_PER_GATEWAY);
+  assertEquals(capped.map((l) => l.plantIds), [[1], [2], [3], [4], [5], [6]]);
+
+  // Each gateway is judged on its own, and a gateway that failed gets none.
+  const two = [...onHub(2), ...onHub(2, 2, 11)];
+  assertEquals(planLastSeenLookups(two, { 1: live(), 2: live(1) }), [
+    { gatewayId: 1, channel: 1, plantIds: [1, 2] },
+    { gatewayId: 2, channel: 2, plantIds: [12] },
+  ]);
+  assertEquals(planLastSeenLookups(two, { 1: AUTH_FAILURE, 2: live(1, 2) }), []);
 });
 
 Deno.test("buildReport: the forecast feeds the advice", () => {

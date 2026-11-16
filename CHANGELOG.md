@@ -7,10 +7,11 @@ Entries before the public release describe the private working version. The publ
 ## 2026-11-15
 
 - Ported the Ecowitt retries from the private version. A request that fails in a way that can clear on its own (a dropped connection, a 5xx or 429, an unreadable body, Ecowitt's busy codes) is tried up to three times. Rejected keys, unknown gateways and timeouts are not retried.
+- Ported the limit on last-seen lookups. A gateway whose sensors are all quiet gets one history lookup that answers for all of them, and individual dropouts are capped at six lookups per gateway, so a hub outage no longer means dozens of slow calls.
 
 ## Public release (2026-10-06)
 
-- Cleaned-up public version of the private working repo: restructured layout, tests, CI, a demo mode and documentation. It left out the Ecowitt retries, which came back on 2026-11-15.
+- Cleaned-up public version of the private working repo: restructured layout, tests, CI, a demo mode and documentation. It left out the Ecowitt retries and the limit on last-seen lookups, which came back on 2026-11-15.
 
 ## 2026-08-27
 

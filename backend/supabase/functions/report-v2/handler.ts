@@ -5,7 +5,8 @@
  * 2. Read their Ecowitt keys, gateways, zones, plants and preferences through
  *    PostgREST *with the caller's JWT*, so row-level security scopes every
  *    query to their own rows.
- * 3. Fetch live readings per gateway and the forecast, in parallel.
+ * 3. Fetch live readings per gateway and the forecast, in parallel. A gateway
+ *    whose request fails in a way that can clear on its own is tried again.
  * 4. Look up last-seen times for sensors that are not reporting.
  * 5. Build the report with the shared, pure advice engine.
  */
@@ -15,6 +16,7 @@ import {
   fetchGatewayReadings,
   fetchLastSeen,
   type FetchLike,
+  type RetryOptions,
 } from "../_shared/ecowitt.ts";
 import { fetchForecast, forecastLocation } from "../_shared/forecast.ts";
 import { bearerToken, json, preflight } from "../_shared/http.ts";
@@ -32,6 +34,8 @@ export interface ReportDeps {
   fetch: FetchLike;
   env: () => SupabaseEnv;
   now: () => Date;
+  /** Waits between Ecowitt retries. Defaults to a real timer; tests skip the wait. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface EcowittAccountRow {
@@ -89,7 +93,9 @@ export function createReportHandler(deps: ReportDeps): (req: Request) => Promise
       const location = forecastLocation(prefs, gateways);
 
       const [gatewayResults, weather] = await Promise.all([
-        fetchAllGateways(deps.fetch, creds, gateways),
+        // An empty answer is retried too: on a page that refreshes every minute,
+        // one blip would otherwise show a whole gateway as "no reading".
+        fetchAllGateways(deps.fetch, creds, gateways, { retryEmptyData: true, sleep: deps.sleep }),
         location ? fetchForecast(deps.fetch, location, now) : Promise.resolve(null),
       ]);
 
@@ -137,10 +143,11 @@ async function fetchAllGateways(
   fetchFn: FetchLike,
   creds: EcowittCredentials,
   gateways: GatewayRow[],
+  retry: RetryOptions,
 ): Promise<Record<number, GatewayResult>> {
   const byMac = new Map<string, Promise<GatewayResult>>();
   for (const g of gateways) {
-    if (!byMac.has(g.mac)) byMac.set(g.mac, fetchGatewayReadings(fetchFn, creds, g.mac));
+    if (!byMac.has(g.mac)) byMac.set(g.mac, fetchGatewayReadings(fetchFn, creds, g.mac, retry));
   }
   const results: Record<number, GatewayResult> = {};
   await Promise.all(gateways.map(async (g) => {

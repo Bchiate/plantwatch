@@ -6,6 +6,10 @@
  * saying whether the keys were rejected, the gateway is unknown, or the API
  * could not be reached. The report then shows "update your keys" instead of
  * "check the battery" on every plant.
+ *
+ * Failures that can clear on their own (a dropped connection, a 5xx, an
+ * unreadable body, Ecowitt's "busy" codes) are tried again before they are
+ * reported. Rejected keys and unknown gateways are reported at once.
  */
 
 import type { ChannelReading, GatewayResult, SourceError } from "./report.ts";
@@ -20,11 +24,27 @@ export interface EcowittCredentials {
 export const ECOWITT_API = "https://api.ecowitt.net/api/v3";
 export const SOIL_CHANNELS = 16;
 const TIMEOUT_MS = 8_000;
+/** Attempts per call, including the first. */
+export const DEFAULT_ATTEMPTS = 3;
+/** The wait before attempt n + 1 is n times this: 0.5 s, then 1 s. */
+const BACKOFF_STEP_MS = 500;
 
 /** API codes for a rejected or missing application key / API key. */
 const CREDENTIAL_ERROR_CODES = new Set([40010, 40011, 40017, 40018]);
 /** API codes for an unknown or missing gateway MAC. */
 const DEVICE_ERROR_CODES = new Set([40012, 40019]);
+/** API codes for "system busy" and "called too often". */
+const TRANSIENT_API_CODES = new Set([-1, 45001]);
+
+/** How a call retries failures that can clear on their own. */
+export interface RetryOptions {
+  /** Total attempts, including the first. 1 turns retrying off. */
+  attempts?: number;
+  /** Also try again after a successful answer with no data in it. */
+  retryEmptyData?: boolean;
+  /** Waits between attempts. Tests pass one that returns at once. */
+  sleep?: (ms: number) => Promise<void>;
+}
 
 type ApiResult = { ok: true; data: unknown } | { ok: false; error: SourceError };
 
@@ -35,8 +55,59 @@ export function classifyApiError(code: number, msg: string): SourceError {
   return { kind: "api", message, code };
 }
 
-/** GET an Ecowitt endpoint and unwrap its `{ code, msg, data }` envelope. */
+/**
+ * Whether trying again can help. Rejected keys and unknown gateways stay wrong
+ * however often they are sent. A timeout has already used the call's whole
+ * time allowance, so it is not retried either; the report refreshes on its own.
+ */
+export function isTransient(error: SourceError): boolean {
+  switch (error.kind) {
+    case "network":
+      return true;
+    case "http":
+      return error.code === null || error.code === 429 || error.code >= 500;
+    case "api":
+      // No code means the body was empty or was not JSON.
+      return error.code === null || TRANSIENT_API_CODES.has(error.code);
+    case "auth":
+    case "device":
+    case "timeout":
+      return false;
+  }
+}
+
+/**
+ * GET an Ecowitt endpoint. A failure that can clear on its own is tried again
+ * (three attempts by default, waiting 0.5 s and then 1 s), so one blip does not
+ * leave a whole gateway without readings until the next refresh.
+ */
 export async function ecowittGet(
+  fetchFn: FetchLike,
+  path: string,
+  params: Record<string, string>,
+  retry: RetryOptions = {},
+): Promise<ApiResult> {
+  const attempts = Math.max(1, retry.attempts ?? DEFAULT_ATTEMPTS);
+  const sleep = retry.sleep ?? wait;
+  let result = await ecowittGetOnce(fetchFn, path, params);
+  for (let attempt = 1; attempt < attempts && shouldRetry(result, retry); attempt++) {
+    await sleep(BACKOFF_STEP_MS * attempt);
+    result = await ecowittGetOnce(fetchFn, path, params);
+  }
+  return result;
+}
+
+function shouldRetry(result: ApiResult, retry: RetryOptions): boolean {
+  if (!result.ok) return isTransient(result.error);
+  return retry.retryEmptyData === true && Object.keys(asRecord(result.data)).length === 0;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** One attempt: GET an endpoint and unwrap its `{ code, msg, data }` envelope. */
+async function ecowittGetOnce(
   fetchFn: FetchLike,
   path: string,
   params: Record<string, string>,
@@ -90,17 +161,24 @@ function credentialParams(creds: EcowittCredentials): Record<string, string> {
   return { application_key: creds.appKey, api_key: creds.apiKey };
 }
 
-/** Live readings for every soil channel on one gateway. */
+/**
+ * Live readings for every soil channel on one gateway.
+ *
+ * A successful answer with nothing in it can be a blip or a hub that is
+ * offline. With `retryEmptyData` it is tried again; a hub that stays empty
+ * still ends as "no reading", not as an error.
+ */
 export async function fetchGatewayReadings(
   fetchFn: FetchLike,
   creds: EcowittCredentials,
   mac: string,
+  retry: RetryOptions = {},
 ): Promise<GatewayResult> {
   const result = await ecowittGet(fetchFn, "device/real_time", {
     ...credentialParams(creds),
     mac,
     call_back: "all",
-  });
+  }, retry);
   return result.ok ? { ok: true, channels: parseSoilChannels(result.data) } : result;
 }
 
@@ -126,6 +204,10 @@ export function parseSoilChannels(data: unknown): Record<number, ChannelReading>
 /**
  * Time of the most recent valid reading for an offline channel, or null.
  * Looks back 3 days first (half-hour resolution), then 90 days.
+ *
+ * Each lookup gets one attempt. A last-seen time is optional, and it is asked
+ * for exactly when sensors are dropping out, which is when Ecowitt is most
+ * likely to be struggling already.
  */
 export async function fetchLastSeen(
   fetchFn: FetchLike,
@@ -144,7 +226,7 @@ export async function fetchLastSeen(
       end_date: formatEcowittDate(now, timeZone),
       cycle_type: "auto",
       call_back: `soil_ch${channel}`,
-    });
+    }, { attempts: 1 });
     if (!result.ok) return null;
     const seen = latestValidTimestamp(result.data, channel);
     if (seen) return seen;
@@ -209,8 +291,9 @@ export interface DeviceSummary {
 export async function listDevices(
   fetchFn: FetchLike,
   creds: EcowittCredentials,
+  retry: RetryOptions = {},
 ): Promise<{ ok: true; devices: DeviceSummary[] } | { ok: false; error: SourceError }> {
-  const result = await ecowittGet(fetchFn, "device/list", credentialParams(creds));
+  const result = await ecowittGet(fetchFn, "device/list", credentialParams(creds), retry);
   if (!result.ok) return result;
   const list = asRecord(result.data).list;
   const devices: DeviceSummary[] = [];

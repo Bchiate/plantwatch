@@ -2,11 +2,15 @@
 
 Dates are when the work was committed. Version numbers are the iOS app's.
 
-Entries before the public release describe the private working version. The public version leaves out the admin dashboard, guest sharing and the Ecowitt retries, which have not been ported yet.
+Entries before the public release describe the private working version. The public version leaves out the admin dashboard and guest sharing.
+
+## 2026-11-15
+
+- Ported the Ecowitt retries from the private version. A request that fails in a way that can clear on its own (a dropped connection, a 5xx or 429, an unreadable body, Ecowitt's busy codes) is tried up to three times. Rejected keys, unknown gateways and timeouts are not retried.
 
 ## Public release (2026-10-06)
 
-- Cleaned-up public version of the private working repo: restructured layout, tests, CI, a demo mode and documentation.
+- Cleaned-up public version of the private working repo: restructured layout, tests, CI, a demo mode and documentation. It left out the Ecowitt retries, which came back on 2026-11-15.
 
 ## 2026-08-27
 

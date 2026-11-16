@@ -50,14 +50,14 @@ The ownership check on `plants` matters because `(gateway_id, channel)` is uniqu
 
 Both functions are thin handlers around shared modules in `backend/supabase/functions/_shared/`:
 
-| Module        | Responsibility                                                                                                      | I/O              |
-| ------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| `advice.ts`   | Species table, thresholds, watering amounts, `assessPlant()`                                                        | none             |
-| `report.ts`   | Turns rows, sensor results and the forecast into the report JSON; `reassess()` for client-side edits                | none             |
-| `ecowitt.ts`  | Ecowitt API v3 client. Failures become typed `SourceError`s (`auth`, `device`, `api`, `http`, `network`, `timeout`) | fetch (injected) |
-| `forecast.ts` | Open-Meteo request and summary (rain in the next 24 h / 48 h, highest precipitation probability)                    | fetch (injected) |
-| `supabase.ts` | Auth user lookup and a PostgREST client bound to the caller's JWT                                                   | fetch (injected) |
-| `http.ts`     | CORS and JSON responses                                                                                             | none             |
+| Module        | Responsibility                                                                                                                                                    | I/O              |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `advice.ts`   | Species table, thresholds, watering amounts, `assessPlant()`                                                                                                      | none             |
+| `report.ts`   | Turns rows, sensor results and the forecast into the report JSON; `reassess()` for client-side edits                                                              | none             |
+| `ecowitt.ts`  | Ecowitt API v3 client. Failures become typed `SourceError`s (`auth`, `device`, `api`, `http`, `network`, `timeout`); ones that can clear on their own are retried | fetch (injected) |
+| `forecast.ts` | Open-Meteo request and summary (rain in the next 24 h / 48 h, highest precipitation probability)                                                                  | fetch (injected) |
+| `supabase.ts` | Auth user lookup and a PostgREST client bound to the caller's JWT                                                                                                 | fetch (injected) |
+| `http.ts`     | CORS and JSON responses                                                                                                                                           | none             |
 
 Handlers take `fetch`, the environment and a clock as parameters, which is how the tests exercise them without a network.
 

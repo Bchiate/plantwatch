@@ -22,6 +22,8 @@ export interface DevicesDeps {
   fetch: FetchLike;
   env: () => SupabaseEnv;
   now: () => Date;
+  /** Waits between Ecowitt retries. Defaults to a real timer; tests skip the wait. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface DevicesRequest {
@@ -58,7 +60,8 @@ export function createDevicesHandler(deps: DevicesDeps): (req: Request) => Promi
       }
       if (!creds) return json({ error: "No Ecowitt keys provided or saved." }, 400);
 
-      const listed = await listDevices(deps.fetch, creds);
+      const retry = { sleep: deps.sleep };
+      const listed = await listDevices(deps.fetch, creds, retry);
       if (!listed.ok) {
         const rejected = listed.error.kind === "auth";
         return json(
@@ -73,7 +76,7 @@ export function createDevicesHandler(deps: DevicesDeps): (req: Request) => Promi
       }
 
       const gateways = await Promise.all(listed.devices.map(async (device) => {
-        const live = await fetchGatewayReadings(deps.fetch, creds, device.mac);
+        const live = await fetchGatewayReadings(deps.fetch, creds, device.mac, retry);
         const channels = live.ok
           ? Object.entries(live.channels)
             .map(([channel, r]) => ({ channel: Number(channel), ...r }))

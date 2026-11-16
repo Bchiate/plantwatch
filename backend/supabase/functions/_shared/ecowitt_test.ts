@@ -5,18 +5,29 @@ import {
   fetchGatewayReadings,
   fetchLastSeen,
   formatEcowittDate,
+  isTransient,
   latestValidTimestamp,
   listDevices,
   parseNumber,
   parseSoilChannels,
 } from "./ecowitt.ts";
 import { fakeFetch, jsonResponse, on } from "./fake_fetch.ts";
+import type { SourceError } from "./report.ts";
 
 const CREDS = { appKey: "APP-KEY", apiKey: "API-KEY" };
 const MAC = "00:00:5E:00:53:01"; // documentation-range MAC (RFC 7042)
 
+/** Retry without waiting, so tests of failures stay fast. */
+const NO_WAIT = { sleep: () => Promise.resolve() };
+
 function realtime(data: unknown) {
   return jsonResponse({ code: 0, msg: "success", time: "1790000000", data });
+}
+
+/** Answers each call with the next response in the list, then repeats the last one. */
+function sequence(...responses: Array<() => Response | Promise<Response>>) {
+  let i = 0;
+  return fakeFetch(() => responses[Math.min(i++, responses.length - 1)]());
 }
 
 const LIVE_DATA = {
@@ -98,11 +109,100 @@ Deno.test("fetchGatewayReadings: failures are reported, never turned into empty 
   ];
   for (const [label, respond, kind, code] of cases) {
     const { fetch } = fakeFetch(() => respond());
-    const result = await fetchGatewayReadings(fetch, CREDS, MAC);
+    const result = await fetchGatewayReadings(fetch, CREDS, MAC, NO_WAIT);
     assert(!result.ok, label);
     assertEquals(result.error.kind, kind, label);
     assertEquals(result.error.code, code, label);
     assert(!result.error.message.includes("API-KEY"), `${label}: message must not echo keys`);
+  }
+});
+
+Deno.test("retries: blips are tried again, waiting 0.5 s and then 1 s", async () => {
+  const waits: number[] = [];
+  const { fetch, calls } = sequence(
+    () => new Response("busy", { status: 503 }),
+    () => jsonResponse({ code: -1, msg: "System is busy" }),
+    () => realtime(LIVE_DATA),
+  );
+  const result = await fetchGatewayReadings(fetch, CREDS, MAC, {
+    sleep: (ms) => {
+      waits.push(ms);
+      return Promise.resolve();
+    },
+  });
+  assert(result.ok);
+  assertEquals(Object.keys(result.channels), ["1", "3"]);
+  assertEquals(calls.length, 3);
+  assertEquals(waits, [500, 1000]);
+});
+
+Deno.test("retries: gives up after three attempts and reports the last failure", async () => {
+  const { fetch, calls } = sequence(() => jsonResponse({ code: 45001, msg: "Too frequent" }));
+  const result = await fetchGatewayReadings(fetch, CREDS, MAC, NO_WAIT);
+  assert(!result.ok);
+  assertEquals([result.error.kind, result.error.code], ["api", 45001]);
+  assertEquals(calls.length, 3);
+
+  const once = sequence(() => new Response("busy", { status: 503 }));
+  await fetchGatewayReadings(once.fetch, CREDS, MAC, { ...NO_WAIT, attempts: 1 });
+  assertEquals(once.calls.length, 1, "attempts: 1 turns retrying off");
+});
+
+Deno.test("retries: rejected keys, an unknown gateway and a timeout are never retried", async () => {
+  const definitive: Array<[string, () => Response | Promise<Response>]> = [
+    ["rejected key", () => jsonResponse({ code: 40011, msg: "Illegal Api_Key Parameter" })],
+    ["unknown MAC", () => jsonResponse({ code: 40012, msg: "Illegal MAC" })],
+    ["HTTP 404", () => new Response("not found", { status: 404 })],
+    ["timeout", () => Promise.reject(new DOMException("signal timed out", "TimeoutError"))],
+  ];
+  for (const [label, respond] of definitive) {
+    const { fetch, calls } = sequence(respond);
+    const result = await fetchGatewayReadings(fetch, CREDS, MAC, NO_WAIT);
+    assert(!result.ok, label);
+    assertEquals(calls.length, 1, label);
+  }
+});
+
+Deno.test("retries: an empty reading is tried again only when asked", async () => {
+  const empty = () => realtime([]);
+  const retryEmpty = { ...NO_WAIT, retryEmptyData: true };
+
+  const blip = sequence(empty, () => realtime(LIVE_DATA));
+  const recovered = await fetchGatewayReadings(blip.fetch, CREDS, MAC, retryEmpty);
+  assert(recovered.ok);
+  assertEquals(Object.keys(recovered.channels), ["1", "3"]);
+  assertEquals(blip.calls.length, 2);
+
+  const offline = sequence(empty);
+  assertEquals(
+    await fetchGatewayReadings(offline.fetch, CREDS, MAC, retryEmpty),
+    { ok: true, channels: {} },
+    "a hub that stays empty ends as 'no reading', not as an error",
+  );
+  assertEquals(offline.calls.length, 3);
+
+  const plain = sequence(empty);
+  await fetchGatewayReadings(plain.fetch, CREDS, MAC, NO_WAIT);
+  assertEquals(plain.calls.length, 1, "not retried unless asked");
+});
+
+Deno.test("isTransient: only failures that can clear on their own", () => {
+  const cases: Array<[SourceError["kind"], number | null, boolean]> = [
+    ["network", null, true],
+    ["http", 500, true],
+    ["http", 503, true],
+    ["http", 429, true],
+    ["http", 404, false],
+    ["api", null, true], // empty or non-JSON body
+    ["api", -1, true], // system busy
+    ["api", 45001, true], // called too often
+    ["api", 40000, false],
+    ["auth", 40011, false],
+    ["device", 40012, false],
+    ["timeout", null, false],
+  ];
+  for (const [kind, code, expected] of cases) {
+    assertEquals(isTransient({ kind, code, message: "x" }), expected, `${kind} ${code}`);
   }
 });
 
@@ -139,6 +239,10 @@ Deno.test("fetchLastSeen: widens the window from 3 to 90 days, and gives up on e
   const failing = fakeFetch(() => jsonResponse({ code: 40011, msg: "bad key" }));
   assertEquals(await fetchLastSeen(failing.fetch, CREDS, MAC, 5, now, null), null);
   assertEquals(failing.calls.length, 1, "no second lookup after an API error");
+
+  const busy = sequence(() => new Response("busy", { status: 503 }));
+  assertEquals(await fetchLastSeen(busy.fetch, CREDS, MAC, 5, now, null), null);
+  assertEquals(busy.calls.length, 1, "last-seen lookups get one attempt, even for a blip");
 });
 
 Deno.test("formatEcowittDate: local time in the gateway's zone, 24-hour, UTC fallback", () => {

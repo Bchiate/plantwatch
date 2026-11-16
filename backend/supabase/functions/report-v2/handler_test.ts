@@ -125,6 +125,7 @@ function setup(db: Db = defaultDb(), ...extra: Route[]) {
     fetch: fake.fetch,
     env: () => ({ url: SUPABASE, anonKey: ANON_KEY }),
     now: () => NOW,
+    sleep: () => Promise.resolve(),
   });
   return { handler, calls: fake.calls };
 }
@@ -195,6 +196,28 @@ Deno.test("report-v2: builds the report, enriches offline sensors, flags the fai
   assertEquals(report.weather.available, true);
   assertEquals(report.weather.temp_now_f, 61);
   assertEquals(report.user?.email, "gardener@example.com");
+});
+
+Deno.test("report-v2: an Ecowitt blip is retried instead of blanking the gateway", async () => {
+  let blips = 1;
+  const busyOnce: Route = (call) =>
+    call.url.pathname.endsWith("/real_time") &&
+      call.url.searchParams.get("mac") === "00:00:5E:00:53:01" && blips-- > 0
+      ? jsonResponse({ code: -1, msg: "System is busy" })
+      : undefined;
+  const { handler, calls } = setup(defaultDb(), busyOnce);
+  const report = await (await handler(get())).json() as Report;
+
+  const lemon = report.readings.find((r) => r.name === "Lemon tree")!;
+  assertEquals([lemon.moisture, lemon.status], [44, "good"]);
+  assertEquals(report.source_errors.map((e) => e.gateway_name), ["Patio hub"]);
+
+  const liveCalls = (mac: string) =>
+    calls.filter((c) =>
+      c.url.pathname.endsWith("/real_time") && c.url.searchParams.get("mac") === mac
+    ).length;
+  assertEquals(liveCalls("00:00:5E:00:53:01"), 2, "the busy answer was tried again");
+  assertEquals(liveCalls("00:00:5E:00:53:02"), 1, "rejected keys are not retried");
 });
 
 Deno.test("report-v2: new users are sent to onboarding", async () => {

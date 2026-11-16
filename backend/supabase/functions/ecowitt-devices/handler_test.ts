@@ -48,6 +48,7 @@ function setup(savedKeys: unknown[] = []) {
     fetch: fake.fetch,
     env: () => ({ url: SUPABASE, anonKey: "anon-key" }),
     now: () => NOW,
+    sleep: () => Promise.resolve(),
   });
   return { handler, calls: fake.calls };
 }

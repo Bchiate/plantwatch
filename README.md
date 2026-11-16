@@ -26,7 +26,8 @@ The commit history is reconstructed from my private working repo. Dates and orde
 - **May 25–30, 2026.** First release for one garden, then more than a dozen iOS builds in five days as it met real use: sensor dropouts, offline alerts, per-plant overrides.
 - **May 30.** Rebuilt as multi-tenant: sign-in, per-user data isolated by Postgres row-level security, authenticated functions (v2.0 and v2.1).
 - **August.** In the private version: security hardening, an admin dashboard, read-only sharing for guests, and retries for flaky sensor-API calls.
-- **October 6.** The public release: one large cleanup pass that restructured the code and added the tests, CI and demo mode. It leaves out the admin dashboard, guest sharing and the sensor-API retries, which have not been ported yet.
+- **October 6.** The public release: one large cleanup pass that restructured the code and added the tests, CI and demo mode. It left out the admin dashboard, guest sharing and the sensor-API retries.
+- **November 15.** Ported the sensor-API retries back from the private version, with tests. The admin dashboard and guest sharing are still only in the private version.
 
 The full list is in [CHANGELOG.md](CHANGELOG.md).
 
@@ -71,7 +72,7 @@ flowchart LR
 
 1. A client calls `report-v2` with the signed-in user's JWT.
 2. The function checks the token with Supabase Auth, then reads the user's Ecowitt keys, gateways, zones, plants and preferences through PostgREST **with the same JWT**, so row-level security limits every query to that user's rows.
-3. It fetches live readings from Ecowitt (one request per gateway) and the forecast from Open-Meteo in parallel, and looks up a "last seen" time for any sensor that is not reporting.
+3. It fetches live readings from Ecowitt (one request per gateway, tried up to three times when the failure can clear on its own) and the forecast from Open-Meteo in parallel, and looks up a "last seen" time for any sensor that is not reporting.
 4. A pure, typed advice engine (`backend/supabase/functions/_shared/advice.ts`) evaluates each plant and the function returns one JSON report that both clients render.
 
 The web client edits plant settings directly in Postgres (PATCH and RPC calls under the user's JWT). It re-evaluates an edited plant instantly with a browser build of the same engine, so the advice on screen and the advice from the server cannot disagree. More detail, including the data model and report format, is in [docs/architecture.md](docs/architecture.md).
